@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+
+# env (실제 값 — .env.example 템플릿만 커밋)
+.env
+.env.local
+.env.*.local
+
+# logs / 임시
+*.log
+*.tmp
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db

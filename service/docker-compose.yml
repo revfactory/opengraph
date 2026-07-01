@@ -1,0 +1,85 @@
+# docker-compose.yml — OG unfurl 서비스 실기동 스택
+#
+#   redis:7      핫 캐시(2단계 키/SWR/single-flight 락) — CacheClient=ioredis
+#   postgres:16  crawl_attempts(정본)/failed_crawls/crawls/domain_rules/dlq — CrawlStore=pg
+#   migrate      one-shot: migrations/001_init.sql 적용 후 종료(app 기동 전 선행)
+#   app          Fastify API (:8080) — REDIS_URL/DATABASE_URL 주입되어 실 어댑터 사용
+#
+# 기동:  docker compose up --build
+# 검증:  docker compose config          (YAML/의존 유효성)
+#        curl 'http://localhost:8080/unfurl?url=https://example.com/'
+#
+# .env 파일이 있으면 자동 로드된다(.env.example 참고). 없어도 아래 기본값으로 기동.
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ogsvc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ogsvc}
+      POSTGRES_DB: ${POSTGRES_DB:-ogsvc}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ogsvc} -d ${POSTGRES_DB:-ogsvc}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["npm", "run", "migrate"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-ogsvc}:${POSTGRES_PASSWORD:-ogsvc}@postgres:5432/${POSTGRES_DB:-ogsvc}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PORT: 8080
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://${POSTGRES_USER:-ogsvc}:${POSTGRES_PASSWORD:-ogsvc}@postgres:5432/${POSTGRES_DB:-ogsvc}
+      # 타임아웃 예산(config.ts 기본값 오버라이드 예시)
+      OG_SYNC_BUDGET_MS: ${OG_SYNC_BUDGET_MS:-3000}
+      OG_TOTAL_TIMEOUT_MS: ${OG_TOTAL_TIMEOUT_MS:-8000}
+      OG_CONNECT_TIMEOUT_MS: ${OG_CONNECT_TIMEOUT_MS:-3000}
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis-data:
+  pg-data:

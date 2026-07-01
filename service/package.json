@@ -1,0 +1,39 @@
+{
+  "name": "og-unfurl-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OG(Open Graph) 추출 unfurl 서비스 참조 구현 — 통합 아키텍처(_workspace/02) 계약 준수",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "smoke": "tsx scripts/smoke.ts",
+    "migrate": "tsx scripts/migrate.ts",
+    "test:integration": "tsx test/integration.test.ts"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "content-type": "^1.0.5",
+    "fastify": "^4.28.1",
+    "iconv-lite": "^0.6.3",
+    "ioredis": "^5.4.1",
+    "pg": "^8.22.0",
+    "undici": "^6.19.8"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.46.0"
+  },
+  "devDependencies": {
+    "@types/content-type": "^1.1.8",
+    "@types/node": "^22.5.0",
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  },
+  "comment": "playwright는 optionalDependencies — 헤드리스 워커에서만 필요. 설치 실패해도 static/oembed 경로는 동작(headless.ts가 graceful fallback). 통합 아키텍처 ①: 크롤/추출 마이크로서비스 런타임 = Node.js 22 + TypeScript + Fastify."
+}

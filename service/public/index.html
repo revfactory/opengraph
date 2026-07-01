@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>unfurl · Open Graph 추출 콘솔</title>
+<meta name="description" content="URL을 입력하면 Open Graph 메타데이터를 추출해 링크 미리보기와 진단 리드아웃을 보여주는 콘솔." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&family=Martian+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0a0b0d; --bg2:#0e1013; --panel:#121418; --panel2:#161a1f;
+    --line:#22262e; --line2:#2c313b; --ink:#e9ecef; --dim:#969ca6; --faint:#606672;
+    --signal:#cbf24e; --signal-d:#9bbf34;
+    --cyan:#4fe3f0; --amber:#f2b84e; --coral:#ff6d5f; --violet:#b992ff;
+    --r:14px; --mono:'Martian Mono',ui-monospace,monospace; --sans:'Archivo',system-ui,sans-serif;
+    --ease:cubic-bezier(.2,.7,.2,1);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+    font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased;
+    min-height:100vh; overflow-x:hidden;
+  }
+  /* ── atmosphere ── */
+  .bg{position:fixed;inset:0;z-index:-2;pointer-events:none;
+    background:
+      radial-gradient(120% 80% at 50% -10%, rgba(203,242,78,.10), transparent 55%),
+      radial-gradient(80% 60% at 90% 8%, rgba(79,227,240,.06), transparent 60%),
+      var(--bg);
+  }
+  .grid{position:fixed;inset:0;z-index:-2;pointer-events:none;opacity:.5;
+    background-image:
+      linear-gradient(var(--line) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:64px 64px;
+    -webkit-mask-image:radial-gradient(120% 90% at 50% 0,#000,transparent 78%);
+            mask-image:radial-gradient(120% 90% at 50% 0,#000,transparent 78%);
+  }
+  .grain{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.035;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+
+  .wrap{max-width:1160px;margin:0 auto;padding:0 24px 96px}
+
+  /* ── masthead ── */
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:26px 0 22px;border-bottom:1px solid var(--line);margin-bottom:44px;position:relative}
+  .brand{display:flex;align-items:center;gap:13px}
+  .mark{width:34px;height:34px;position:relative;flex:0 0 auto}
+  .mark i{position:absolute;inset:0;border:1.5px solid var(--signal);border-radius:50%;opacity:.9}
+  .mark i:nth-child(2){inset:6px;border-color:var(--cyan);opacity:.55}
+  .mark i:nth-child(3){inset:12px;background:var(--signal);border:0;box-shadow:0 0 14px 1px rgba(203,242,78,.6);animation:pulse 3.4s var(--ease) infinite}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(.7);opacity:.5}}
+  .brand h1{font-family:var(--mono);font-weight:600;font-size:18px;letter-spacing:.02em;margin:0}
+  .brand h1 b{color:var(--signal);font-weight:600}
+  .brand .sub{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-top:1px}
+  .status{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+  .status .led{width:7px;height:7px;border-radius:50%;background:var(--signal);box-shadow:0 0 8px var(--signal)}
+  .status a{color:var(--dim);text-decoration:none;border-bottom:1px solid var(--line2);padding-bottom:1px;transition:color .2s}
+  .status a:hover{color:var(--signal)}
+
+  /* ── hero copy ── */
+  .lede{margin:0 0 30px;max-width:720px}
+  .lede .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--signal-d)}
+  .lede h2{font-family:var(--mono);font-weight:500;font-size:clamp(26px,4.4vw,44px);line-height:1.08;letter-spacing:-.01em;margin:12px 0 14px}
+  .lede h2 em{font-style:normal;color:var(--signal)}
+  .lede p{color:var(--dim);font-size:15.5px;max-width:600px;margin:0}
+
+  /* ── console ── */
+  .console{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line2);
+    border-radius:var(--r);padding:20px;position:relative;box-shadow:0 30px 80px -40px rgba(0,0,0,.9)}
+  .console::before{content:"INPUT";position:absolute;top:-9px;left:18px;font-family:var(--mono);font-size:9.5px;
+    letter-spacing:.22em;color:var(--faint);background:var(--panel2);padding:0 8px}
+  .field{display:flex;gap:12px;align-items:stretch}
+  .inputbox{flex:1;display:flex;align-items:center;gap:11px;background:var(--bg);border:1px solid var(--line2);
+    border-radius:10px;padding:0 15px;transition:border-color .2s,box-shadow .2s}
+  .inputbox:focus-within{border-color:var(--signal);box-shadow:0 0 0 3px rgba(203,242,78,.12)}
+  .inputbox .pfx{font-family:var(--mono);color:var(--signal-d);font-size:14px;flex:0 0 auto}
+  #url{flex:1;background:none;border:0;outline:0;color:var(--ink);font-family:var(--mono);
+    font-size:14.5px;padding:15px 0;min-width:0}
+  #url::placeholder{color:var(--faint)}
+  .go{flex:0 0 auto;display:flex;align-items:center;gap:9px;background:var(--signal);color:#141a05;border:0;
+    border-radius:10px;padding:0 22px;font-family:var(--mono);font-weight:600;font-size:13px;letter-spacing:.06em;
+    text-transform:uppercase;cursor:pointer;transition:transform .15s var(--ease),box-shadow .2s,filter .2s}
+  .go:hover{filter:brightness(1.06);box-shadow:0 8px 26px -8px rgba(203,242,78,.6)}
+  .go:active{transform:translateY(1px)}
+  .go:disabled{cursor:progress;filter:saturate(.4) brightness(.8)}
+  .go .arw{transition:transform .25s var(--ease)}
+  .go:hover .arw{transform:translateX(3px)}
+
+  .exrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px}
+  .exrow .lab{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-right:2px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);background:var(--bg);border:1px solid var(--line);
+    border-radius:20px;padding:5px 12px;cursor:pointer;transition:all .18s;white-space:nowrap}
+  .chip:hover{color:var(--signal);border-color:var(--signal-d);background:rgba(203,242,78,.05)}
+  .chip b{color:var(--faint);font-weight:400;margin-right:5px}
+  .chip:hover b{color:var(--signal-d)}
+
+  /* ── output shell ── */
+  .out{margin-top:34px;min-height:60px}
+  .hint{font-family:var(--mono);font-size:12.5px;color:var(--faint);text-align:center;padding:38px 0;letter-spacing:.02em}
+  .hint span{color:var(--signal-d)}
+
+  /* scanning */
+  .scan{border:1px solid var(--line2);border-radius:var(--r);overflow:hidden;background:var(--panel)}
+  .scan .bar{height:3px;background:linear-gradient(90deg,transparent,var(--signal),transparent);
+    background-size:40% 100%;animation:scan 1.05s var(--ease) infinite;background-repeat:no-repeat}
+  @keyframes scan{0%{background-position:-40% 0}100%{background-position:140% 0}}
+  .scan .body{padding:26px;display:flex;flex-direction:column;gap:13px}
+  .sk{height:12px;border-radius:6px;background:linear-gradient(90deg,var(--panel2),var(--line),var(--panel2));
+    background-size:200% 100%;animation:sh 1.3s linear infinite}
+  @keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  .scan .msg{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase}
+
+  /* result grid */
+  .result{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:22px;align-items:start}
+  @media(max-width:820px){.result{grid-template-columns:1fr}}
+  .panel{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+    border-radius:var(--r);position:relative;opacity:0;transform:translateY(14px);animation:rise .5s var(--ease) forwards}
+  @keyframes rise{to{opacity:1;transform:none}}
+  .panel .tag{position:absolute;top:-9px;left:16px;font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;
+    color:var(--faint);background:var(--panel2);padding:0 8px}
+
+  /* preview card */
+  .pv{overflow:hidden}
+  .pv .img{aspect-ratio:1.91/1;background:var(--bg2);position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+  .pv .img img{width:100%;height:100%;object-fit:cover;display:block}
+  .pv .img.empty{display:flex;align-items:center;justify-content:center}
+  .pv .img.empty::after{content:"NO og:image";font-family:var(--mono);font-size:11px;letter-spacing:.15em;color:var(--faint)}
+  .pv .txt{padding:18px 20px 20px}
+  .pv .site{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+    color:var(--dim);text-transform:lowercase;margin-bottom:9px}
+  .pv .site .fav{width:15px;height:15px;border-radius:4px;background:var(--line2);flex:0 0 auto;
+    display:grid;place-items:center;color:var(--signal);font-size:9px;font-family:var(--mono)}
+  .pv .ttl{font-size:19px;font-weight:700;line-height:1.28;margin:0 0 8px;letter-spacing:-.01em}
+  .pv .desc{color:var(--dim);font-size:14px;line-height:1.5;margin:0;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .pv .type{margin-top:14px;display:inline-flex;font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--faint);border:1px solid var(--line);border-radius:6px;padding:3px 9px}
+
+  /* readout */
+  .rd{padding:18px 18px 8px;animation-delay:.06s}
+  .rd .strip{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+  .badge{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    padding:5px 10px;border-radius:7px;border:1px solid var(--line2);color:var(--dim);display:inline-flex;align-items:center;gap:6px}
+  .badge .d{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .badge.on{color:var(--signal);border-color:rgba(203,242,78,.4);background:rgba(203,242,78,.07)}
+  .badge.cy{color:var(--cyan);border-color:rgba(79,227,240,.4);background:rgba(79,227,240,.07)}
+  .badge.am{color:var(--amber);border-color:rgba(242,184,78,.4);background:rgba(242,184,78,.07)}
+  .badge.co{color:var(--coral);border-color:rgba(255,109,95,.4);background:rgba(255,109,95,.07)}
+  .badge.vi{color:var(--violet);border-color:rgba(185,146,255,.4);background:rgba(185,146,255,.07)}
+
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:9px 0;border-top:1px solid var(--line)}
+  .row .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);flex:0 0 auto}
+  .row .v{font-family:var(--mono);font-size:12.5px;color:var(--ink);text-align:right;word-break:break-all;min-width:0}
+  .row .v.dim{color:var(--dim)}
+  .row .v a{color:var(--cyan);text-decoration:none}
+  .row .v a:hover{text-decoration:underline}
+
+  /* gauge */
+  .gauge{display:flex;align-items:center;gap:10px}
+  .gauge .track{width:110px;height:8px;border-radius:5px;background:var(--bg2);border:1px solid var(--line);overflow:hidden;position:relative}
+  .gauge .fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--signal-d),var(--signal));width:0;transition:width .9s var(--ease)}
+  .gauge .num{font-family:var(--mono);font-size:12px;color:var(--ink)}
+
+  /* redirect chain — the signature */
+  .chain{margin-top:14px;border-top:1px solid var(--line);padding-top:16px}
+  .chain .h{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:12px;display:flex;justify-content:space-between}
+  .chain .h b{color:var(--signal-d);font-weight:500}
+  .hop{position:relative;padding:0 0 15px 26px}
+  .hop::before{content:"";position:absolute;left:6px;top:15px;bottom:-3px;width:1px;background:var(--line2)}
+  .hop:last-child{padding-bottom:2px}
+  .hop:last-child::before{display:none}
+  .hop .dot{position:absolute;left:0;top:3px;width:13px;height:13px;border-radius:50%;border:2px solid var(--line2);background:var(--panel)}
+  .hop.first .dot{border-color:var(--dim)}
+  .hop.last .dot{border-color:var(--signal);background:var(--signal);box-shadow:0 0 10px rgba(203,242,78,.5)}
+  .hop .u{font-family:var(--mono);font-size:11.5px;color:var(--ink);word-break:break-all;line-height:1.4}
+  .hop.last .u{color:var(--signal)}
+  .hop .m{display:flex;gap:7px;margin-top:4px;align-items:center;flex-wrap:wrap}
+  .hop .code{font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;padding:2px 7px;border-radius:5px;
+    border:1px solid var(--line2);color:var(--dim)}
+  .hop .code.r3{color:var(--amber);border-color:rgba(242,184,78,.35)}
+  .hop .code.r2{color:var(--signal);border-color:rgba(203,242,78,.35)}
+  .hop .htype{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .hop .htype.js{color:var(--violet)}
+  .hop .htype.meta_refresh{color:var(--cyan)}
+  .hop .htype.cached{color:var(--signal-d)}
+
+  .smap{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .smap .s{font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:3px 7px}
+  .smap .s b{color:var(--signal-d);font-weight:500}
+
+  /* error panel */
+  .err{grid-column:1/-1;border-color:rgba(255,109,95,.35)}
+  .err .top{display:flex;align-items:center;gap:13px;padding:20px 20px 14px}
+  .err .glyph{width:38px;height:38px;border-radius:9px;border:1px solid rgba(255,109,95,.4);background:rgba(255,109,95,.08);
+    display:grid;place-items:center;color:var(--coral);font-family:var(--mono);font-size:20px;flex:0 0 auto}
+  .err .code{font-family:var(--mono);font-size:16px;color:var(--coral);font-weight:600;letter-spacing:.02em}
+  .err .cls{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-top:2px}
+  .err .hintx{padding:0 20px 18px;color:var(--dim);font-size:14px;max-width:70ch}
+
+  /* raw json */
+  .raw{position:relative;margin-top:20px;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}
+  .raw summary{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+    padding:13px 128px 13px 16px;cursor:pointer;list-style:none;display:flex;align-items:center;gap:9px;user-select:none}
+  .raw summary::-webkit-details-marker{display:none}
+  .raw summary::before{content:"+";color:var(--signal);font-size:14px}
+  .raw[open] summary::before{content:"−"}
+  .raw summary:hover{color:var(--ink)}
+  .raw pre{margin:0;padding:0 16px 16px;font-family:var(--mono);font-size:11.5px;line-height:1.6;color:var(--dim);
+    overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+  .raw pre .kk{color:var(--cyan)} .raw pre .ss{color:var(--signal)} .raw pre .nn{color:var(--amber)}
+  /* raw json 우측 상단 도구: 클립보드 복사 · JSON 다운로드 */
+  .rawtools{position:absolute;top:8px;right:10px;display:flex;gap:6px;z-index:2}
+  .rbtn{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;
+    color:var(--dim);background:var(--bg);border:1px solid var(--line2);border-radius:7px;padding:5px 9px;
+    cursor:pointer;transition:all .15s}
+  .rbtn:hover{color:var(--signal);border-color:var(--signal-d);background:rgba(203,242,78,.06)}
+  .rbtn.ok{color:var(--signal);border-color:var(--signal-d);background:rgba(203,242,78,.1)}
+
+  footer{margin-top:56px;padding-top:22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;
+    flex-wrap:wrap;gap:10px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:var(--faint)}
+  footer a{color:var(--dim);text-decoration:none;border-bottom:1px solid var(--line2)}
+  footer a:hover{color:var(--signal)}
+
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="bg"></div><div class="grid"></div><div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="mark"><i></i><i></i><i></i></div>
+      <div>
+        <h1>un<b>furl</b></h1>
+        <div class="sub">Open Graph 추출 콘솔</div>
+      </div>
+    </div>
+    <div class="status">
+      <span class="led" id="led"></span><span id="svc">service online</span>
+      <a href="https://ogp.me/" target="_blank" rel="noopener">OGP ↗</a>
+    </div>
+  </header>
+
+  <section class="lede">
+    <div class="kicker">URL → OG METADATA</div>
+    <h2>링크를 <em>펼쳐서</em> 무엇이 들었는지 본다.</h2>
+    <p>단축·리다이렉트 링크의 최종 도착지를 추적하고, Open Graph·Twitter Card·JSON-LD를 폴백 순서로 추출해 미리보기 카드와 진단 리드아웃을 만든다.</p>
+  </section>
+
+  <section class="console">
+    <form class="field" id="form" autocomplete="off">
+      <label class="inputbox" for="url">
+        <span class="pfx">⌕</span>
+        <input id="url" name="url" type="text" inputmode="url" placeholder="https://example.com/article  또는  bit.ly/단축링크" />
+      </label>
+      <button class="go" id="go" type="submit">추출 <span class="arw">→</span></button>
+    </form>
+    <div class="exrow" id="ex">
+      <span class="lab">예시</span>
+      <button class="chip" data-u="https://www.theverge.com"><b>news</b>theverge.com</button>
+      <button class="chip" data-u="https://github.com/nodejs/node"><b>repo</b>github.com/nodejs/node</button>
+      <button class="chip" data-u="https://youtu.be/dQw4w9WgXcQ"><b>oembed</b>youtu.be/…</button>
+      <button class="chip" data-u="http://169.254.169.254/latest/meta-data/"><b>ssrf</b>메타데이터 차단 테스트</button>
+    </div>
+  </section>
+
+  <section class="out" id="out">
+    <div class="hint">URL을 입력하고 <span>추출</span>을 누르면 결과가 여기 표시됩니다.</div>
+  </section>
+
+  <footer>
+    <span>OG UNFURL · 참조 구현 (Node 22 · Fastify)</span>
+    <span><a href="/docs" onclick="return false" title="repo docs/">docs/</a> · GET /unfurl?url=…&amp;debug=true</span>
+  </footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const out = $('#out'), form = $('#form'), input = $('#url'), go = $('#go');
+
+// 에러 taxonomy 표시용 힌트(통합 §1-1 확정 코드) — 표시 전용 sugar.
+const TAX = {
+  SSRF_BLOCKED:{c:'security · permanent',h:'사설/링크로컬/클라우드 메타데이터 IP로 해석되어 차단됐습니다. DNS 해석 후 + 리다이렉트 홉마다 검증하는 SSRF 가드가 정상 동작한 것입니다.'},
+  SCHEME_BLOCKED:{c:'security · permanent',h:'http/https 외 스킴은 허용되지 않습니다.'},
+  PORT_BLOCKED:{c:'security · permanent',h:'허용되지 않은 포트입니다(내부 서비스 스캔 차단).'},
+  INVALID_URL:{c:'input · permanent',h:'URL을 파싱할 수 없습니다. 스킴(https://)을 포함했는지 확인하세요.'},
+  DNS_FAIL:{c:'network · permanent',h:'호스트 이름을 해석하지 못했습니다(오타/소멸 도메인).'},
+  CONN_TIMEOUT:{c:'network · transient',h:'연결이 시간 안에 완료되지 않았습니다. 재시도 대상입니다.'},
+  READ_TIMEOUT:{c:'network · transient',h:'본문 수신이 타임아웃됐습니다.'},
+  TLS_ERROR:{c:'network · permanent',h:'TLS 핸드셰이크/인증서 오류입니다.'},
+  HTTP_403:{c:'http · permanent→규칙',h:'원본이 기본 UA를 봇으로 차단했습니다. per-domain UA 오버라이드/헤드리스 규칙으로 전환 가능한 대표 케이스입니다.'},
+  HTTP_404:{c:'http · permanent',h:'페이지가 존재하지 않습니다.'},
+  HTTP_410:{c:'http · permanent',h:'페이지가 영구 삭제됐습니다.'},
+  HTTP_429:{c:'http · transient',h:'레이트리밋에 걸렸습니다. Retry-After를 존중해 백오프 재시도합니다.'},
+  HTTP_4XX_OTHER:{c:'http · permanent',h:'기타 4xx 응답입니다.'},
+  HTTP_5XX:{c:'http · transient',h:'원본 서버 오류입니다. 백오프 재시도 대상입니다.'},
+  TOO_MANY_REDIRECTS:{c:'redirect · permanent',h:'리다이렉트 홉 상한을 초과했습니다.'},
+  REDIRECT_LOOP:{c:'redirect · permanent',h:'리다이렉트 순환이 감지됐습니다.'},
+  NO_OG_TAGS:{c:'extract · permanent',h:'HTML이지만 OG/폴백 메타가 없습니다. SPA면 헤드리스 승격이 필요할 수 있습니다.'},
+  NON_HTML:{c:'content · permanent',h:'HTML이 아닌 콘텐츠(이미지/PDF 등)라 최소 카드만 생성됩니다.'},
+  EMPTY_BODY:{c:'content · transient',h:'본문이 비어 있습니다.'},
+  TOO_LARGE:{c:'resource · permanent',h:'본문이 크기 상한을 초과했습니다.'},
+  JS_TIMEOUT:{c:'headless · transient',h:'헤드리스 렌더 대기가 타임아웃됐습니다.'},
+  RENDER_CRASH:{c:'headless · transient',h:'헤드리스 렌더가 실패했습니다(브라우저 미설치 시 graceful fallback).'},
+  BOT_CHALLENGE:{c:'anti-bot · conditional',h:'봇 챌린지/인터스티셜을 통과하지 못했습니다.'},
+  OEMBED_FAILED:{c:'provider · transient',h:'공급자 oEmbed API 호출이 실패했습니다.'},
+  ROBOTS_DISALLOWED:{c:'policy · permanent',h:'robots.txt 정책에 의해 차단됐습니다.'},
+  UNKNOWN:{c:'internal · permanent',h:'분류되지 않은 오류입니다.'},
+};
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const host = u => { try{return new URL(u).hostname.replace(/^www\./,'');}catch{return u||'';} };
+
+const STRAT = {static:['on','STATIC'],oembed:['cy','OEMBED'],headless:['vi','HEADLESS']};
+const CACHE = {hit:['cy','CACHE HIT'],stale:['am','STALE · SWR'],miss:['','CACHE MISS'],negative:['co','NEGATIVE']};
+const STAT  = {ok:['on','OK'],partial:['am','PARTIAL'],failed:['co','FAILED']};
+
+function badge([cls,label]){return `<span class="badge ${cls||''}"><span class="d"></span>${label}</span>`;}
+
+function scanning(){
+  out.innerHTML = `<div class="scan"><div class="bar"></div><div class="body">
+     <div class="msg" id="scanmsg">정규화 · SSRF 검증 · 페치 …</div>
+     <div class="sk" style="width:52%"></div><div class="sk" style="width:88%"></div><div class="sk" style="width:70%"></div>
+   </div></div>`;
+  const msgs=['정규화 · SSRF 검증','리다이렉트 추적 · 최종 URL 확정','폴백 파싱 OG→Twitter→JSON-LD','완성도 산출'];
+  let i=0; const el=$('#scanmsg');
+  return setInterval(()=>{ i=(i+1)%msgs.length; if(el) el.textContent=msgs[i]+' …'; },560);
+}
+
+function chainHtml(env){
+  const dbg = env.debug||{};
+  let hops = (dbg.redirect_chain||[]).slice();
+  const finalU = (env.meta&&env.meta.final_url) || dbg.normalized_url || dbg.input_url;
+  // 리다이렉트가 없으면 input→final 단일 경로로 표현.
+  let nodes=[];
+  const start = dbg.input_url || dbg.normalized_url || finalU;
+  if(hops.length){
+    nodes.push({u:hops[0].url});
+    hops.forEach(h=>nodes.push({u:h.location, status:h.status, hop_type:h.hop_type}));
+  }else{
+    nodes.push({u:start});
+    if(finalU && finalU!==start) nodes.push({u:finalU, status:env.debug&&env.debug.http_status});
+  }
+  const rows = nodes.map((n,idx)=>{
+    const first=idx===0, last=idx===nodes.length-1;
+    const codeCls = n.status>=300&&n.status<400?'r3':(n.status>=200&&n.status<300?'r2':'');
+    const meta = (n.status?`<span class="code ${codeCls}">${n.status}</span>`:'') +
+                 (n.hop_type?`<span class="htype ${n.hop_type}">${n.hop_type.replace('_',' ')}</span>`:(last?'<span class="htype cached">final</span>':''));
+    return `<div class="hop ${first?'first':''} ${last?'last':''}"><span class="dot"></span>
+      <div class="u">${esc(n.u)}</div>${meta?`<div class="m">${meta}</div>`:''}</div>`;
+  }).join('');
+  const cachedShort = dbg.short_link_cached?' · <b>short-link cached</b>':'';
+  return `<div class="chain"><div class="h"><span>REDIRECT CHAIN</span><span>${nodes.length-1} hop${nodes.length-1===1?'':'s'}${cachedShort}</span></div>${rows}</div>`;
+}
+
+function smapHtml(sm){
+  if(!sm) return '';
+  const keys=Object.keys(sm); if(!keys.length) return '';
+  return `<div class="smap">`+keys.map(k=>`<span class="s">${k} ← <b>${esc(sm[k])}</b></span>`).join('')+`</div>`;
+}
+
+let lastJsonText = '';      // 원본(하이라이트 전) — copy/download가 사용
+let lastJsonHost = 'unfurl'; // 다운로드 파일명 힌트
+function jsonHtml(obj){
+  lastJsonText = JSON.stringify(obj,null,2);
+  try{ const u=(obj.meta&&obj.meta.final_url)||(obj.debug&&obj.debug.final_url); if(u) lastJsonHost=new URL(u).hostname.replace(/^www\./,''); }catch{ lastJsonHost='unfurl'; }
+  const j = lastJsonText
+    .replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))
+    .replace(/"([^"]+)":/g,'"<span class="kk">$1</span>":')
+    .replace(/: "([^"]*)"/g,': "<span class="ss">$1</span>"')
+    .replace(/: (\d+\.?\d*)/g,': <span class="nn">$1</span>');
+  return `<details class="raw">
+    <div class="rawtools">
+      <button class="rbtn" type="button" onclick="copyJson(event,this)" title="클립보드에 JSON 복사">⧉ copy</button>
+      <button class="rbtn" type="button" onclick="downloadJson(event)" title="JSON 파일로 다운로드">↓ .json</button>
+    </div>
+    <summary>raw json · GET /unfurl?debug=true</summary><pre>${j}</pre></details>`;
+}
+function copyJson(e, btn){
+  e.preventDefault(); e.stopPropagation();
+  const restore = ()=>{ btn.textContent='✓ copied'; btn.classList.add('ok');
+    setTimeout(()=>{ btn.textContent='⧉ copy'; btn.classList.remove('ok'); },1400); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(lastJsonText).then(restore).catch(()=>fallbackCopy(lastJsonText,restore));
+  } else fallbackCopy(lastJsonText, restore);
+}
+function fallbackCopy(text, done){
+  const ta=document.createElement('textarea'); ta.value=text;
+  ta.style.position='fixed'; ta.style.top='-9999px'; document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); done&&done(); }catch(_){/*noop*/} document.body.removeChild(ta);
+}
+function downloadJson(e){
+  e.preventDefault(); e.stopPropagation();
+  const stamp=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  const blob=new Blob([lastJsonText],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`unfurl-${lastJsonHost}-${stamp}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+function renderOk(env){
+  const d=env.data, m=env.meta, dbg=env.debug||{};
+  const img = d.image ? `<div class="img"><img src="${esc(d.image)}" alt="" onerror="this.parentElement.classList.add('empty');this.remove()"></div>`
+                      : `<div class="img empty"></div>`;
+  const pv = `<div class="panel pv"><span class="tag">PREVIEW</span>${img}
+    <div class="txt">
+      <div class="site"><span class="fav">◎</span>${esc(host(m.final_url))}</div>
+      <h3 class="ttl">${esc(d.title||'(제목 없음)')}</h3>
+      <p class="desc">${esc(d.description||'(설명 없음)')}</p>
+      ${d.type?`<span class="type">${esc(d.type)}</span>`:''}
+    </div></div>`;
+
+  const pct = Math.round((dbg.completeness_score??(m.completeness==='full'?1:.5))*100);
+  const rd = `<div class="panel rd"><span class="tag">READOUT</span>
+    <div class="strip">
+      ${badge(STAT[dbg.status||'ok']||STAT.ok)}
+      ${badge(STRAT[m.fetch_strategy]||['','?'])}
+      ${badge(CACHE[m.cache]||CACHE.miss)}
+      ${dbg.recovery?badge([dbg.recovery.via==='headless'?'vi':'am','⟳ '+(dbg.recovery.via==='headless'?'HEADLESS':'UA')+' 회복']):''}
+    </div>
+    ${dbg.recovery?`<div class="row"><span class="k">bot recovery</span><span class="v">봇 차단 → <b style="color:var(--amber)">${esc(dbg.recovery.via)}</b> 전환${dbg.recovery.ua?` · <span class="dim">${esc(dbg.recovery.ua.split(' ')[0])}</span>`:''}${dbg.recovery.learned?` · <span style="color:var(--signal)">규칙 학습됨</span>`:''}</span></div>`:''}
+    <div class="row"><span class="k">completeness</span><span class="v"><span class="gauge">
+      <span class="track"><span class="fill" style="width:0"></span></span><span class="num">${(dbg.completeness_score??0).toFixed(2)}</span></span></span></div>
+    ${dbg.latency_ms!=null?`<div class="row"><span class="k">latency</span><span class="v">${dbg.latency_ms} ms</span></div>`:''}
+    ${dbg.http_status!=null?`<div class="row"><span class="k">http</span><span class="v">${dbg.http_status}</span></div>`:''}
+    <div class="row"><span class="k">final url</span><span class="v"><a href="${esc(m.final_url)}" target="_blank" rel="noopener">${esc(m.final_url)}</a></span></div>
+    ${m.canonical_url&&m.canonical_url!==m.final_url?`<div class="row"><span class="k">canonical</span><span class="v dim">${esc(m.canonical_url)}</span></div>`:''}
+    <div class="row"><span class="k">source map</span><span class="v">${smapHtml(dbg.source_map)||'<span class="dim">—</span>'}</span></div>
+    ${chainHtml(env)}
+  </div>`;
+
+  out.innerHTML = `<div class="result">${pv}${rd}</div>${jsonHtml(env)}`;
+  requestAnimationFrame(()=>{ const f=$('.gauge .fill'); if(f) f.style.width=pct+'%'; });
+}
+
+function renderErr(env, httpCode){
+  const code = (env.error&&env.error.code) || 'UNKNOWN';
+  const t = TAX[code] || {c:'error',h:env.error&&env.error.message||''};
+  const chain = (env.debug&&(env.debug.redirect_chain||[]).length) ? chainHtml(env) : '';
+  out.innerHTML = `<div class="panel err"><span class="tag">DIAGNOSTIC</span>
+    <div class="top"><div class="glyph">!</div><div>
+      <div class="code">${esc(code)}</div><div class="cls">${esc(t.c)}${httpCode?' · http '+httpCode:''}</div>
+    </div></div>
+    <div class="hintx">${esc(t.h)}</div>
+    ${chain?`<div style="padding:0 20px 16px">${chain}</div>`:''}
+  </div>${jsonHtml(env)}`;
+}
+
+function renderQueued(env){
+  out.innerHTML = `<div class="panel rd" style="grid-column:1/-1"><span class="tag">QUEUED</span>
+    <div style="padding:22px 20px">
+      <div class="strip">${badge(['am','202 · 큐 승격'])}</div>
+      <p style="color:var(--dim);font-size:14px;margin:6px 0 0">동기 예산(타임아웃)을 초과해 비동기 큐로 승격됐습니다. 느린/헤드리스 크롤은 백그라운드에서 계속되어 캐시에 기록됩니다.</p>
+      <div class="row"><span class="k">job id</span><span class="v">${esc(env.job_id||'')}</span></div>
+      <div class="row"><span class="k">poll</span><span class="v dim">${esc(env.poll_url||'')}</span></div>
+    </div></div>${jsonHtml(env)}`;
+}
+
+async function run(url){
+  if(!url) { input.focus(); return; }
+  go.disabled=true; const timer=scanning();
+  try{
+    const res = await fetch('/unfurl?url='+encodeURIComponent(url)+'&debug=true',{headers:{accept:'application/json'}});
+    const env = await res.json().catch(()=>({error:{code:'UNKNOWN',message:'응답 파싱 실패'}}));
+    clearInterval(timer);
+    if(res.status===202){ renderQueued(env); }
+    else if(env.error){ renderErr(env, res.status); }
+    else if(env.data){ renderOk(env); }
+    else { renderErr({error:{code:'UNKNOWN',message:'예상치 못한 응답'}, debug:env.debug}, res.status); }
+  }catch(e){
+    clearInterval(timer);
+    out.innerHTML = `<div class="panel err"><span class="tag">DIAGNOSTIC</span>
+      <div class="top"><div class="glyph">⚠</div><div><div class="code">NETWORK</div>
+      <div class="cls">클라이언트 · 요청 실패</div></div></div>
+      <div class="hintx">서비스에 연결하지 못했습니다. <code>cd service &amp;&amp; npm run dev</code> 로 서버를 기동한 뒤 이 페이지를 여세요(같은 오리진).</div></div>`;
+  }finally{ go.disabled=false; }
+}
+
+form.addEventListener('submit', e=>{ e.preventDefault(); run(input.value.trim()); });
+$('#ex').addEventListener('click', e=>{ const c=e.target.closest('.chip'); if(!c)return; input.value=c.dataset.u; run(c.dataset.u); });
+
+// 서비스 헬스 표시
+fetch('/healthz').then(r=>r.ok?null:Promise.reject()).catch(()=>{
+  $('#led').style.background='var(--coral)'; $('#led').style.boxShadow='0 0 8px var(--coral)'; $('#svc').textContent='service offline';
+});
+</script>
+</body>
+</html>
