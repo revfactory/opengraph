@@ -1,0 +1,26 @@
+# Netlify 배포 설정
+# 정적 콘솔(service/public) = CDN 직접 서빙 · API(/unfurl, /healthz) = 서버리스 함수
+# 함수는 config.path 로 경로를 잡으므로 별도 redirect 불필요.
+# 주의: base 는 빌드 명령 실행 위치. publish/functions 는 "저장소 루트" 기준 경로.
+
+[build]
+  base = "service"
+  command = "npm ci && npm run build"
+  publish = "service/public"
+  functions = "service/netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # playwright JS 는 설치(타입체크용)하되 브라우저 바이너리는 받지 않음(Lambda 미사용).
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+
+[functions]
+  node_bundler = "esbuild"
+  # playwright(헤드리스)는 Lambda 미지원 → 번들 제외. 런타임 동적 import 실패 시 graceful fallback.
+  external_node_modules = ["playwright"]
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
