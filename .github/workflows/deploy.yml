@@ -1,0 +1,41 @@
+name: Deploy to Netlify
+
+# main 에 푸시되면 자동으로 빌드·검증 후 Netlify 프로덕션에 배포한다.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# 동시 배포 방지(최신 커밋만 배포)
+concurrency:
+  group: netlify-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # 사이트 식별자(비민감 — 사이트 공개 ID). 인증 토큰만 시크릿으로 주입.
+      NETLIFY_SITE_ID: a2b958a8-c083-4a29-8615-66ea89d4c2a0
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: service/package-lock.json
+
+      # 배포 전 검증(깨진 커밋이 배포되지 않도록)
+      - name: Install & verify
+        working-directory: service
+        run: |
+          npm ci
+          npm run typecheck
+          npm run smoke
+
+      # netlify.toml(base=service, command=npm ci && npm run build) 대로 빌드+함수 번들+프로덕션 배포
+      - name: Deploy to Netlify (production)
+        run: npx --yes netlify-cli@26 deploy --build --prod --message "CI ${GITHUB_SHA::7}"
