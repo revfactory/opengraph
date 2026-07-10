@@ -12,7 +12,9 @@
  */
 
 import { Agent, request } from 'undici';
-import { gunzipSync, brotliDecompressSync, inflateSync, inflateRawSync } from 'node:zlib';
+import { createGunzip, createBrotliDecompress, createInflate, createInflateRaw } from 'node:zlib';
+import { Readable, type Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import iconv from 'iconv-lite';
 import contentType from 'content-type';
 import { CONFIG } from '../config.js';
@@ -89,25 +91,70 @@ function buildHeaders(rule: DomainRule): Record<string, string> {
   return headers;
 }
 
-/** Content-Encoding 해제. cap은 압축 바이트에 적용됨(EXTENSION: 해제 후 재-cap). */
-function decompress(buf: Buffer, encoding: string | undefined): Buffer {
-  if (!encoding) return buf;
+/**
+ * Content-Encoding 해제 — 스트리밍 + **해제 후** 바이트 재-cap (zip bomb 방어).
+ *
+ * readCapped 는 압축 바이트만 제한하므로 소량의 압축 본문이 수 GB로 팽창하는 폭탄을 못 막는다.
+ * 이 함수는 청크 단위로 해제하며 누적 바이트가 cap 을 넘는 순간 스트림을 파괴하고 즉시 TOO_LARGE —
+ * 메모리가 실제로 폭발하기 전에 차단한다. 동기 gunzipSync 대비 이벤트루프 블로킹도 완화한다.
+ * cap 초과가 아닌 손상/부분 압축은 여태 해제된 만큼 보존한다(부분 결과 보존 원칙).
+ */
+export async function decompressCapped(
+  buf: Buffer,
+  encoding: string | undefined,
+  cap: number,
+): Promise<Buffer> {
+  if (!encoding) return buf; // 비압축 — 이미 readCapped(압축=원본 cap) 통과분
   const enc = encoding.toLowerCase();
+
+  // 스트림에 buf 를 흘려 해제하되, 누적이 cap 을 넘으면 TOO_LARGE, 아무것도 못 해제하면(총 0) reject.
+  // pipeline 이 소스·transform 정리를 자동 보장(누수/부유 error 방지). 3분기 동작은 consumer가 유지.
+  const run = async (stream: Transform): Promise<Buffer> => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    try {
+      await pipeline(Readable.from(buf), stream, async (source) => {
+        for await (const c of source as AsyncIterable<Buffer>) {
+          total += c.length;
+          if (total > cap) {
+            throw new CrawlError('TOO_LARGE', `decompressed body exceeded cap ${cap}`);
+          }
+          chunks.push(c);
+        }
+      });
+      return Buffer.concat(chunks, total);
+    } catch (err) {
+      if (err instanceof CrawlError) throw err; // cap 초과 전파
+      if (total === 0) throw err; // 아무것도 못 해제 → 폴백/실패 판단으로
+      return Buffer.concat(chunks, total); // 부분 해제분 보존
+    }
+  };
+
+  const makeStream = (): Transform | null => {
+    if (enc === 'gzip' || enc === 'x-gzip') return createGunzip();
+    if (enc === 'br') return createBrotliDecompress();
+    if (enc === 'deflate') return createInflate();
+    return null;
+  };
+
+  const stream = makeStream();
+  if (!stream) return buf; // 미지원 인코딩 — 원본 반환(기존 동작)
+
   try {
-    if (enc === 'gzip' || enc === 'x-gzip') return gunzipSync(buf);
-    if (enc === 'br') return brotliDecompressSync(buf);
+    return await run(stream);
+  } catch (err) {
+    if (err instanceof CrawlError) throw err; // TOO_LARGE 는 상위로
+    // deflate: zlib 헤더 없는 raw deflate 1회 폴백
     if (enc === 'deflate') {
       try {
-        return inflateSync(buf);
-      } catch {
-        return inflateRawSync(buf); // 헤더 없는 raw deflate 폴백
+        return await run(createInflateRaw());
+      } catch (err2) {
+        if (err2 instanceof CrawlError) throw err2;
+        return buf;
       }
     }
-  } catch {
-    // 손상/부분 압축 — 있는 만큼만 사용(부분 결과 보존 원칙)
-    return buf;
+    return buf; // 해제 불가 — 원본 보존(기존 동작)
   }
-  return buf;
 }
 
 /** charset 결정: Content-Type → <meta charset> → BOM → utf-8 (crawl §4.2). */
@@ -291,7 +338,8 @@ export async function safeFetch(
     const serverRaw = res.headers['server'];
     const server = Array.isArray(serverRaw) ? (serverRaw[0] ?? null) : (serverRaw ?? null);
 
-    const decompressed = decompress(raw, encoding);
+    // ★ 해제 후 재-cap: 압축 폭탄(팽창)을 여기서 차단. TOO_LARGE 는 agent 정리 후 상위로 전파됨.
+    const decompressed = await decompressCapped(raw, encoding, bodyCap);
     if (decompressed.length === 0) {
       throw new CrawlError('EMPTY_BODY', '200 with empty body', { httpStatus: status });
     }

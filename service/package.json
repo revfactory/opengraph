@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "smoke": "tsx scripts/smoke.ts",
     "migrate": "tsx scripts/migrate.ts",
-    "test:integration": "tsx test/integration.test.ts"
+    "test:integration": "tsx test/integration.test.ts",
+    "test:decompress": "tsx test/decompress.test.ts"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
