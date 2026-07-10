@@ -1,0 +1,49 @@
+name: CI
+
+# PR 과 main 푸시에서 서비스 검증(typecheck·smoke·단위·SSRF 통합)을 돌린다.
+# 배포(deploy.yml)와 분리 — 이쪽은 게이트, 저쪽은 릴리스.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 같은 ref 의 이전 실행은 취소(최신 커밋만 검증)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # 헤드리스는 이 게이트에서 불필요 — 브라우저 다운로드 스킵(headless.ts 는 graceful fallback).
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      # 통합 테스트의 외부 네트워크 케이스는 CI 에서 skip — SSRF 차단 등 결정적 케이스만 관통.
+      INTEGRATION_SKIP_NET: "1"
+    defaults:
+      run:
+        working-directory: service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: service/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Smoke (순수 로직)
+        run: npm run smoke
+
+      # 단위 테스트 — 스크립트가 있을 때만(예: zip bomb 수정 머지 후 test:decompress).
+      - name: Unit tests (if present)
+        run: npm run test:decompress --if-present
+
+      - name: Integration (SSRF 등 결정적 케이스, 네트워크 skip)
+        run: npm run test:integration
